@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f172a">
+    <title>Coin Flip Multiplayer</title>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #f1f5f9;
+            --coin-gold: #eab308;
+            --btn-primary: #eab308;
+            --btn-disabled: #475569;
+            --panel-bg: #1e293b;
+        }
+
+        /* Dark Mode Default */
+        :root { color-scheme: dark; }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100dvh;
+            overflow: hidden;
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Background */
+        .bg-blob {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            top: 0; left: 0; z-index: -1; opacity: 0.15;
+            background: radial-gradient(circle at 20% 20%, #9333ea 0%, transparent 40%),
+                        radial-gradient(circle at 80% 80%, #2563eb 0%, transparent 40%);
+        }
+
+        /* Containers */
+        .app-container {
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 1rem;
+            z-index: 10;
+            transition: opacity 0.5s;
+        }
+        
+        .hidden { display: none !important; }
+
+        /* Lobby UI */
+        .lobby-card {
+            background: var(--panel-bg);
+            padding: 2rem;
+            border-radius: 20px;
+            text-align: center;
+            width: 100%;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .lobby-title { font-size: 1.5rem; font-weight: 800; margin-bottom: 1rem; color: #fde047; }
+        .lobby-text { color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; line-height: 1.5; }
+
+        /* Header */
+        .header h1 {
+            font-size: 2rem; font-weight: 900; color: #fde047;
+            text-transform: uppercase; letter-spacing: 1px; text-align: center;
+        }
+        .header p { color: #94a3b8; font-size: 0.8rem; text-align: center; }
+
+        /* Coin 3D */
+        .perspective-container {
+            perspective: 1000px;
+            width: 200px; height: 200px;
+            position: relative; margin: 1rem 0;
+        }
+        .coin {
+            width: 100%; height: 100%;
+            position: relative; transform-style: preserve-3d;
+            border-radius: 50%;
+            transition: transform 3000ms cubic-bezier(0.25, 1, 0.5, 1);
+        }
+        .face {
+            position: absolute; width: 100%; height: 100%;
+            backface-visibility: hidden; -webkit-backface-visibility: hidden;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            border: 4px solid; background-color: #1e293b;
+        }
+        .face-heads { border-color: #ca8a04; background: linear-gradient(135deg, #fde047, #eab308); transform: rotateY(0deg); }
+        .face-tails { border-color: #64748b; background: linear-gradient(135deg, #cbd5e1, #94a3b8); transform: rotateY(180deg); }
+        .face-text { font-size: 5rem; font-weight: bold; font-family: serif; color: rgba(255,255,255,0.9); }
+        
+        /* Status & Multiplayer Info */
+        .status-badge {
+            background: rgba(0,0,0,0.3);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+            border: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+        .status-dot.online { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+
+        .game-status {
+            font-size: 1.2rem;
+            font-weight: 700;
+            height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #f1f5f9;
+        }
+
+        /* Controls */
+        .controls { width: 100%; display: flex; flex-direction: column; gap: 1rem; }
+        
+        button {
+            border: none; outline: none; cursor: pointer; font-family: inherit;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            font-weight: 700; border-radius: 12px; transition: all 0.2s;
+        }
+        button:active { transform: scale(0.98); }
+
+        .btn-main {
+            background-color: var(--btn-primary);
+            color: #0f172a;
+            padding: 1rem;
+            font-size: 1.1rem;
+            width: 100%;
+            box-shadow: 0 4px 0 #a16207;
+        }
+        .btn-main:disabled {
+            background-color: var(--btn-disabled);
+            color: #94a3b8;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: translateY(4px);
+        }
+
+        .share-box {
+            display: flex;
+            gap: 8px;
+            background: rgba(0,0,0,0.3);
+            padding: 4px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .share-input {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-family: monospace;
+            font-size: 0.8rem;
+            width: 100%;
+            padding: 0 8px;
+            outline: none;
+        }
+
+        .btn-copy-small {
+            background: #334155;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            white-space: nowrap;
+        }
+
+        /* Stats */
+        .stats {
+            width: 100%; background: var(--panel-bg);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 1rem;
+        }
+        .stats-row { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .history { display: flex; justify-content: center; gap: 8px; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); min-height: 40px; }
+        .bubble { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: bold; }
+        .bubble-h { background: #eab308; color: #422006; }
+        .bubble-t { background: #94a3b8; color: #0f172a; }
+
+        /* Toast */
+        #toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: #334155; color: white; padding: 10px 20px; border-radius: 30px;
+            font-size: 0.9rem; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3); z-index: 100; white-space: nowrap;
+        }
+
+        #warningBanner {
+            background: #ef4444; color: white; padding: 10px; font-size: 0.8rem; 
+            text-align: center; width: 100%; position: absolute; top: 0; display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-blob"></div>
+    <div id="warningBanner"></div>
+
+    <!-- Lobby Screen -->
+    <div id="lobbyScreen" class="app-container">
+        <div class="header">
+            <h1>Coin Flip</h1>
+            <p>Multiplayer Edition</p>
+        </div>
+        <div class="lobby-card">
+            <div class="lobby-title">Play with a Friend</div>
+            <p class="lobby-text">Create a room, send the link to your friend, and flip the coin in real-time together.</p>
+            <button id="createBtn" class="btn-main">Start New Game</button>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="app-container hidden">
+        
+        <div class="status-badge">
+            <div id="p2Indicator" class="status-dot"></div>
+            <span id="playerStatus">Waiting for opponent...</span>
+        </div>
+
+        <div class="header">
+            <h1>Coin Flip</h1>
+        </div>
+
+        <div class="perspective-container">
+            <div id="coin" class="coin">
+                <div class="face face-heads"><span class="face-text">H</span></div>
+                <div class="face face-tails"><span class="face-text">T</span></div>
+            </div>
+        </div>
+
+        <div class="game-status" id="turnStatus">
+            <!-- "Your Turn" or Result -->
+        </div>
+
+        <div class="controls">
+            <button id="flipBtn" class="btn-main" disabled>FLIP COIN</button>
+            
+            <div class="share-box">
+                <input type="text" id="linkInput" class="share-input" readonly value="Generating link...">
+                <button id="copyLinkBtn" class="btn-copy-small">Copy</button>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stats-row">
+                <span style="color: #facc15">HEADS: <span id="headsCount">0</span></span>
+                <span style="color: #cbd5e1">TAILS: <span id="tailsCount">0</span></span>
+            </div>
+            <div class="history" id="historyContainer">
+                <span style="font-size: 12px; color: #64748b;">No history yet</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast">Link copied!</div>
+
+    <script>
+        // --- Configuration ---
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default';
+
+        // --- State ---
+        let currentUser = null;
+        let gameId = null;
+        let gameUnsubscribe = null;
+        let isMyTurn = false;
+        let myPlayerId = null; // 'p1' or 'p2'
+
+        // --- DOM Elements ---
+        const lobbyScreen = document.getElementById('lobbyScreen');
+        const gameScreen = document.getElementById('gameScreen');
+        const coin = document.getElementById('coin');
+        const flipBtn = document.getElementById('flipBtn');
+        const turnStatus = document.getElementById('turnStatus');
+        const playerStatus = document.getElementById('playerStatus');
+        const p2Indicator = document.getElementById('p2Indicator');
+        const headsCount = document.getElementById('headsCount');
+        const tailsCount = document.getElementById('tailsCount');
+        const historyContainer = document.getElementById('historyContainer');
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
+        const linkInput = document.getElementById('linkInput');
+        const createBtn = document.getElementById('createBtn');
+        const toast = document.getElementById('toast');
+        const warningBanner = document.getElementById('warningBanner');
+
+        // --- Environment Check ---
+        function checkEnvironment() {
+            const protocol = window.location.protocol;
+            if (protocol === 'blob:' || protocol === 'file:') {
+                warningBanner.style.display = 'block';
+                warningBanner.innerHTML = "⚠️ You are running this in a preview/local mode. <b>Multiplayer links will NOT work</b> unless you host this file on a website (e.g. Tiiny.host, Netlify).";
+            }
+        }
+
+        // --- Init ---
+        async function init() {
+            checkEnvironment();
+
+            // Check URL for game ID
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlGameId = urlParams.get('g');
+
+            // Auth First
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                 await auth.signInWithCustomToken(__initial_auth_token);
+            } else {
+                 await auth.signInAnonymously();
+            }
+
+            auth.onAuthStateChanged((user) => {
+                if (!user) return;
+                currentUser = user;
+
+                if (urlGameId) {
+                    joinGame(urlGameId);
+                } else {
+                    lobbyScreen.classList.remove('hidden');
+                }
+            });
+        }
+
+        // --- Game Logic ---
+
+        async function createGame() {
+            createBtn.innerText = "Creating...";
+            createBtn.disabled = true;
+
+            try {
+                const docRef = await db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('games').add({
+                    p1: currentUser.uid,
+                    p2: null,
+                    created: firebase.firestore.FieldValue.serverTimestamp(),
+                    turn: currentUser.uid, // Creator starts
+                    angle: 0,
+                    status: 'waiting',
+                    counts: { heads: 0, tails: 0 },
+                    history: []
+                });
+
+                // Construct URL
+                let baseUrl = window.location.href.split('?')[0];
+                // Remove trailing / if exists
+                if (baseUrl.endsWith('/') && baseUrl.length > 1) baseUrl = baseUrl.slice(0, -1);
+                
+                const newUrl = `${baseUrl}?g=${docRef.id}`;
+                
+                // Try to update address bar (might fail in blob)
+                try {
+                    window.history.pushState({path: newUrl}, '', newUrl);
+                } catch (err) {
+                    console.warn("URL update blocked", err);
+                }
+                
+                joinGame(docRef.id, newUrl);
+            } catch (e) {
+                console.error("Error creating game:", e);
+                alert("Could not create game. Try again.");
+                createBtn.disabled = false;
+            }
+        }
+
+        async function joinGame(id, forcedUrl = null) {
+            gameId = id;
+            lobbyScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+
+            // Set the link input value
+            if (forcedUrl) {
+                linkInput.value = forcedUrl;
+            } else {
+                linkInput.value = window.location.href;
+            }
+
+            const gameRef = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('games').doc(gameId);
+
+            // First fetch to check slot
+            const doc = await gameRef.get();
+            if (!doc.exists) {
+                alert("Game not found!");
+                window.location.search = ''; // Reset
+                return;
+            }
+
+            const data = doc.data();
+
+            // Determine Player Role
+            if (data.p1 === currentUser.uid) {
+                myPlayerId = 'p1';
+            } else if (!data.p2) {
+                // Join as P2
+                await gameRef.update({ p2: currentUser.uid, status: 'active' });
+                myPlayerId = 'p2';
+            } else if (data.p2 === currentUser.uid) {
+                myPlayerId = 'p2';
+            } else {
+                // Check if I am P2 but just reconnected
+                if (data.p2 === currentUser.uid) {
+                     myPlayerId = 'p2';
+                } else {
+                    alert("Game is full! You are watching as spectator.");
+                    myPlayerId = 'spectator';
+                }
+            }
+
+            // Listen for Realtime Updates
+            gameUnsubscribe = gameRef.onSnapshot((snapshot) => {
+                if (!snapshot.exists) return;
+                const gameData = snapshot.data();
+                updateUI(gameData);
+            });
+        }
+
+        function updateUI(data) {
+            // 1. Player Status
+            if (data.p2) {
+                p2Indicator.classList.add('online');
+                playerStatus.innerText = "Opponent connected";
+            } else {
+                p2Indicator.classList.remove('online');
+                playerStatus.innerText = "Waiting for opponent...";
+            }
+
+            // 2. Animation Sync
+            // We use the angle from DB to ensure P1 and P2 see same rotation
+            coin.style.transform = `rotateY(${data.angle}deg)`;
+
+            // 3. Stats & History
+            headsCount.innerText = data.counts.heads;
+            tailsCount.innerText = data.counts.tails;
+            renderHistory(data.history);
+
+            // 4. Turn Logic
+            if (myPlayerId === 'spectator') {
+                turnStatus.innerText = "Spectating";
+                flipBtn.disabled = true;
+                return;
+            }
+
+            if (!data.p2) {
+                turnStatus.innerText = "Waiting for Player 2";
+                flipBtn.disabled = true;
+                return;
+            }
+
+            // Check if flip just finished (based on lastFlip timestamp or derived logic)
+            // For simplicity, we just check who's turn it is
+            if (data.turn === currentUser.uid) {
+                isMyTurn = true;
+                turnStatus.innerText = "Your Turn";
+                turnStatus.style.color = "#fde047";
+                flipBtn.disabled = false;
+                flipBtn.innerText = "FLIP COIN";
+            } else {
+                isMyTurn = false;
+                turnStatus.innerText = "Opponent's Turn";
+                turnStatus.style.color = "#94a3b8";
+                flipBtn.disabled = true;
+                flipBtn.innerText = "WAITING...";
+            }
+        }
+
+        function renderHistory(history) {
+            if (!history || history.length === 0) {
+                historyContainer.innerHTML = '<span style="font-size: 12px; color: #64748b;">No history yet</span>';
+                return;
+            }
+            historyContainer.innerHTML = '';
+            history.forEach(h => {
+                const b = document.createElement('div');
+                b.className = `bubble ${h === 'heads' ? 'bubble-h' : 'bubble-t'}`;
+                b.innerText = h.charAt(0).toUpperCase();
+                historyContainer.appendChild(b);
+            });
+        }
+
+        async function handleFlip() {
+            if (!isMyTurn || !gameId) return;
+
+            // Optimistic UI update
+            flipBtn.disabled = true;
+            flipBtn.innerText = "FLIPPING...";
+            
+            // Calculate Result Locally
+            const randomVal = Math.random();
+            const outcome = randomVal > 0.5 ? 'tails' : 'heads';
+            
+            // Get current rotation from element to ensure smooth transition
+            // Parse 'rotateY(123deg)'
+            const currentStyle = coin.style.transform;
+            let currentAngle = 0;
+            if(currentStyle) {
+                const match = currentStyle.match(/rotateY\((-?\d+\.?\d*)deg\)/);
+                if(match) currentAngle = parseFloat(match[1]);
+            }
+
+            const baseRotation = 1800 + (Math.floor(Math.random() * 3) * 360); 
+            let nextAngle = currentAngle + baseRotation;
+            const currentMod = nextAngle % 360;
+
+            if (outcome === 'heads') {
+                nextAngle += (360 - currentMod);
+            } else {
+                nextAngle += (180 - currentMod) + 360; 
+            }
+
+            // Update DB
+            const gameRef = db.collection('artifacts').doc(APP_ID).collection('public').doc('data').collection('games').doc(gameId);
+            
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const doc = await transaction.get(gameRef);
+                    if (!doc.exists) return;
+                    
+                    const data = doc.data();
+                    const newHistory = [outcome, ...(data.history || [])].slice(0, 5);
+                    const newCounts = { ...data.counts };
+                    newCounts[outcome]++;
+                    
+                    // Switch turn
+                    const nextTurn = data.p1 === currentUser.uid ? data.p2 : data.p1;
+
+                    transaction.update(gameRef, {
+                        angle: nextAngle,
+                        history: newHistory,
+                        counts: newCounts,
+                        turn: nextTurn,
+                        lastFlipTime: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                });
+            } catch (e) {
+                console.error("Flip failed", e);
+                alert("Connection lost. Try again.");
+            }
+        }
+
+        function copyLink() {
+            // Select the text field
+            linkInput.select();
+            linkInput.setSelectionRange(0, 99999); // For mobile devices
+
+            // Copy using Clipboard API if possible, else fallback
+            if (navigator.clipboard && window.isSecureContext) {
+                 navigator.clipboard.writeText(linkInput.value).then(() => {
+                     showToast();
+                 });
+            } else {
+                document.execCommand("copy");
+                showToast();
+            }
+        }
+
+        function showToast() {
+            toast.style.opacity = '1';
+            setTimeout(() => toast.style.opacity = '0', 2000);
+        }
+
+        // --- Listeners ---
+        createBtn.addEventListener('click', createGame);
+        flipBtn.addEventListener('click', handleFlip);
+        copyLinkBtn.addEventListener('click', copyLink);
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>
